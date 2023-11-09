@@ -12,10 +12,11 @@ homepage = "https://github.com/spruceid/ssi/tree/main/did-key/"
 documentation = "https://docs.rs/did-key/"
 
 [features]
-default = ["secp256k1", "secp256r1"]
+default = ["secp256k1", "secp256r1", "jwk_jcs_pub"]
 secp256k1 = ["k256", "ssi-jwk/secp256k1"]
 secp256r1 = ["p256", "ssi-jwk/secp256r1"]
 secp384r1 = ["ssi-jwk/secp384r1"]
+jwk_jcs_pub = []
 
 [dependencies]
 ssi-dids = { path = "../ssi-dids", version = "0.1" }

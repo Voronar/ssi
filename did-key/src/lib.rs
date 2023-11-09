@@ -24,6 +24,7 @@ const DID_KEY_BLS12381_G2_PREFIX: [u8; 2] = [0xeb, 0x01];
 const DID_KEY_P256_PREFIX: [u8; 2] = [0x80, 0x24];
 const DID_KEY_P384_PREFIX: [u8; 2] = [0x81, 0x24];
 const DID_KEY_RSA_PREFIX: [u8; 2] = [0x85, 0x24];
+const DID_KEY_JWK_JCS_PUB_PREFIX: [u8; 2] = [0xd1, 0xd6];
 
 #[derive(Error, Debug)]
 pub enum DIDKeyError {
@@ -36,6 +37,24 @@ pub enum DIDKeyError {
 }
 
 pub struct DIDKey;
+
+impl DIDKey {
+    #[cfg(feature = "jwk_jcs_pub")]
+    pub fn generate_jwk_jcs_pub(&self, jwk: &JWK) -> Option<String> {
+        let canon_jwk_params = jwk.params.to_canon_json_string().ok()?.as_bytes().to_vec();
+
+        let mut key_type = DID_KEY_JWK_JCS_PUB_PREFIX.to_vec();
+        key_type.push(3);
+
+        let did = "did:key:".to_string()
+            + &multibase::encode(
+                multibase::Base::Base58Btc,
+                [key_type, canon_jwk_params].concat(),
+            );
+
+        Some(did)
+    }
+}
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
@@ -213,6 +232,24 @@ impl DIDResolver for DIDKey {
                     private_key: None,
                 }))
             }
+        } else if &data[..2] == &DID_KEY_JWK_JCS_PUB_PREFIX[..2] {
+            #[cfg(feature = "jwk_jcs_pub")]
+            match serde_json::from_slice(&data[3..]) {
+                Ok(jwk) => {
+                    vm_type = "JsonWebKey2020".to_string();
+                    vm_type_iri = "https://w3id.org/security#JsonWebKey2020".to_string();
+                    jwk
+                }
+                Err(err) => return (ResolutionMetadata::from_error(&err.to_string()), None, None),
+            }
+            #[cfg(not(feature = "jwk_jcs_pub"))]
+            return (
+                ResolutionMetadata::from_error(
+                    "did:key multicodec tag 'jwk_jcs_pub' is not supported",
+                ),
+                None,
+                None,
+            );
         } else {
             return (
                 ResolutionMetadata {
@@ -412,6 +449,30 @@ mod tests {
 
         // convert back to DID from JWK
         let did1 = DIDKey.generate(&Source::Key(&key)).unwrap();
+        assert_eq!(did1, did);
+    }
+
+    #[async_std::test]
+    #[cfg(feature = "jwk_jcs_pub")]
+    async fn from_did_key_jwk_jcs_pub() {
+        let did = "did:key:z2dmzD81cgPx8Vki7JbuuMmFYrWPgYoytykUZ3eyqht1j9KbpxsJWbwed6TKT4ZVxE3XYgYPchyzE8SAKAzM6WD5VqK3r9CpXhCpdDE5LMWQ1WDcJBfbbWDGvYgfdtX55gmk9uU3UPgqVZDPqFmnRzFEbLhNGnYaHZy56ojUgbbE9jxe92";
+        let (res_meta, _doc, _doc_meta) = DIDKey
+            .resolve(did, &ResolutionInputMetadata::default())
+            .await;
+        assert_eq!(res_meta.error, None);
+
+        let vm = "did:key:z2dmzD81cgPx8Vki7JbuuMmFYrWPgYoytykUZ3eyqht1j9KbpxsJWbwed6TKT4ZVxE3XYgYPchyzE8SAKAzM6WD5VqK3r9CpXhCpdDE5LMWQ1WDcJBfbbWDGvYgfdtX55gmk9uU3UPgqVZDPqFmnRzFEbLhNGnYaHZy56ojUgbbE9jxe92#z2dmzD81cgPx8Vki7JbuuMmFYrWPgYoytykUZ3eyqht1j9KbpxsJWbwed6TKT4ZVxE3XYgYPchyzE8SAKAzM6WD5VqK3r9CpXhCpdDE5LMWQ1WDcJBfbbWDGvYgfdtX55gmk9uU3UPgqVZDPqFmnRzFEbLhNGnYaHZy56ojUgbbE9jxe92";
+        let (res_meta, object, _meta) =
+            dereference(&DIDKey, vm, &DereferencingInputMetadata::default()).await;
+        assert_eq!(res_meta.error, None);
+        let vm = match object {
+            Content::Object(Resource::VerificationMethod(vm)) => vm,
+            _ => unreachable!(),
+        };
+        let key = vm.public_key_jwk.unwrap();
+
+        // convert back to DID from JWK
+        let did1 = DIDKey.generate_jwk_jcs_pub(&key).unwrap();
         assert_eq!(did1, did);
     }
 

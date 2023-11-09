@@ -90,6 +90,49 @@ pub enum Params {
     OKP(OctetParams),
 }
 
+impl Params {
+    pub fn to_canon_json_string(&self) -> Result<String, Error> {
+        let json_string = match self {
+            Params::RSA(rsa_params) => {
+                let n = rsa_params.modulus.as_ref().ok_or(Error::MissingModulus)?;
+                let e = rsa_params.exponent.as_ref().ok_or(Error::MissingExponent)?;
+                format!(
+                    r#"{{"e":"{}","kty":"RSA","n":"{}"}}"#,
+                    String::from(e),
+                    String::from(n)
+                )
+            }
+            Params::OKP(okp_params) => {
+                format!(
+                    r#"{{"crv":"{}","kty":"OKP","x":"{}"}}"#,
+                    okp_params.curve.clone(),
+                    String::from(okp_params.public_key.clone())
+                )
+            }
+            Params::EC(ec_params) => {
+                let curve = ec_params.curve.as_ref().ok_or(Error::MissingCurve)?;
+                let x = ec_params.x_coordinate.as_ref().ok_or(Error::MissingPoint)?;
+                let y = ec_params.y_coordinate.as_ref().ok_or(Error::MissingPoint)?;
+                format!(
+                    r#"{{"crv":"{}","kty":"EC","x":"{}","y":"{}"}}"#,
+                    curve.clone(),
+                    String::from(x),
+                    String::from(y)
+                )
+            }
+            Params::Symmetric(sym_params) => {
+                let k = sym_params
+                    .key_value
+                    .as_ref()
+                    .ok_or(Error::MissingKeyValue)?;
+                format!(r#"{{"k":"{}","kty":"oct"}}"#, String::from(k))
+            }
+        };
+
+        Ok(json_string)
+    }
+}
+
 impl Drop for ECParams {
     fn drop(&mut self) {
         // Zeroize private key
@@ -433,42 +476,7 @@ impl JWK {
         // JWK parameters for thumbprint hashing must be in lexicographical order, and without
         // string escaping.
         // https://datatracker.ietf.org/doc/html/rfc7638#section-3.1
-        let json_string = match &self.params {
-            Params::RSA(rsa_params) => {
-                let n = rsa_params.modulus.as_ref().ok_or(Error::MissingModulus)?;
-                let e = rsa_params.exponent.as_ref().ok_or(Error::MissingExponent)?;
-                format!(
-                    r#"{{"e":"{}","kty":"RSA","n":"{}"}}"#,
-                    String::from(e),
-                    String::from(n)
-                )
-            }
-            Params::OKP(okp_params) => {
-                format!(
-                    r#"{{"crv":"{}","kty":"OKP","x":"{}"}}"#,
-                    okp_params.curve.clone(),
-                    String::from(okp_params.public_key.clone())
-                )
-            }
-            Params::EC(ec_params) => {
-                let curve = ec_params.curve.as_ref().ok_or(Error::MissingCurve)?;
-                let x = ec_params.x_coordinate.as_ref().ok_or(Error::MissingPoint)?;
-                let y = ec_params.y_coordinate.as_ref().ok_or(Error::MissingPoint)?;
-                format!(
-                    r#"{{"crv":"{}","kty":"EC","x":"{}","y":"{}"}}"#,
-                    curve.clone(),
-                    String::from(x),
-                    String::from(y)
-                )
-            }
-            Params::Symmetric(sym_params) => {
-                let k = sym_params
-                    .key_value
-                    .as_ref()
-                    .ok_or(Error::MissingKeyValue)?;
-                format!(r#"{{"k":"{}","kty":"oct"}}"#, String::from(k))
-            }
-        };
+        let json_string = self.params.to_canon_json_string()?;
         let hash = ssi_crypto::hashes::sha256::sha256(json_string.as_bytes());
         let thumbprint = String::from(Base64urlUInt(hash.to_vec()));
         Ok(thumbprint)
